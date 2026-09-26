@@ -444,7 +444,15 @@ class DatasetWriter:
         hf_features = get_hf_features_from_features(self._meta.features)
         ep_dict = {key: episode_buffer[key] for key in hf_features}
         ep_dataset = datasets.Dataset.from_dict(ep_dict, features=hf_features, split="train")
-        ep_dataset = embed_images(ep_dataset)
+        # Video features are intentionally absent from ``hf_features`` because
+        # their frames are encoded into MP4 files and referenced by episode
+        # metadata. Calling ``embed_images`` when there are no image features
+        # needlessly runs a datasets.map() schema round-trip for every episode;
+        # with datasets 4.8 / pyarrow 25 that path can segfault in
+        # Features.from_arrow_schema(). Only actual image-backed datasets need
+        # their bytes embedded into the frame parquet table.
+        if self._meta.image_keys:
+            ep_dataset = embed_images(ep_dataset)
         ep_num_frames = len(ep_dataset)
 
         if self._latest_episode is None:

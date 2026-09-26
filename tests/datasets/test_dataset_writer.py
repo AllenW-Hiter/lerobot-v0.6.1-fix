@@ -172,6 +172,47 @@ def test_save_episode_resets_buffer(tmp_path):
     assert dataset.writer.episode_buffer["size"] == 0
 
 
+def test_save_video_only_episode_skips_image_embedding(tmp_path):
+    """Video frame paths are not embedded into the frame parquet table."""
+    video_key = "observation.images.cam"
+    features = {
+        video_key: {
+            "dtype": "video",
+            "shape": (16, 16, 3),
+            "names": ["height", "width", "channels"],
+        },
+        "action": {"dtype": "float32", "shape": (2,), "names": None},
+    }
+    dataset = LeRobotDataset.create(
+        repo_id=DUMMY_REPO_ID,
+        fps=DEFAULT_FPS,
+        features=features,
+        root=tmp_path / "ds",
+        use_videos=True,
+    )
+    dataset.add_frame(_make_frame(features))
+    video_metadata = {
+        "episode_index": 0,
+        f"videos/{video_key}/chunk_index": 0,
+        f"videos/{video_key}/file_index": 0,
+        f"videos/{video_key}/from_timestamp": 0.0,
+        f"videos/{video_key}/to_timestamp": 1 / DEFAULT_FPS,
+    }
+
+    with (
+        patch(
+            "lerobot.datasets.dataset_writer.embed_images",
+            side_effect=AssertionError("video-only datasets must not call embed_images"),
+        ),
+        patch.object(dataset.writer, "_save_episode_video", return_value=video_metadata),
+    ):
+        dataset.save_episode(parallel_encoding=False)
+        dataset.finalize()
+
+    assert dataset.meta.total_episodes == 1
+    assert dataset.meta.total_frames == 1
+
+
 def test_save_multiple_episodes(tmp_path):
     """Recording 3 episodes results in correct total counts."""
     dataset = LeRobotDataset.create(
